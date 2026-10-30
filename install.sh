@@ -20,8 +20,10 @@ die() {
 [[ -f "$PATCH" ]] || die "QML patch not found."
 [[ -f "$PROJECT_DIR/bin/ryoku-legion-battery" ]] || die "Helper not found."
 
+available_modes="$(tr '[]' '  ' < "$BATTERY")"
+
 for mode in Fast Standard Long_Life; do
-    grep -Eq "(^|[[:space:]\[])${mode}($|[[:space:]\]])" "$BATTERY" \
+    [[ " $available_modes " == *" $mode "* ]] \
         || die "Unsupported charging mode: $mode"
 done
 
