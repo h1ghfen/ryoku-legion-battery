@@ -33,7 +33,12 @@ if grep -q 'id: chargeModeRead' "$PANEL"; then
     die "Charging controls are already installed."
 fi
 
-[[ ! -e "$BACKUP" ]] || die "Backup already exists: $BACKUP"
+if [[ -e "$BACKUP" ]]; then
+    [[ -f "$BACKUP" && ! -L "$BACKUP" ]] \
+        || die "Backup path is not a regular file: $BACKUP"
+    cmp -s -- "$PANEL" "$BACKUP" \
+        || die "Existing backup differs from the current panel. Refusing to overwrite."
+fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf -- "$TMPDIR"' EXIT
@@ -50,7 +55,9 @@ echo "Installing charging helper (administrator permission required)..."
 sudo install -o root -g root -m 755 \
     "$PROJECT_DIR/bin/ryoku-legion-battery" "$HELPER"
 
-cp -p -- "$PANEL" "$BACKUP"
+if [[ ! -e "$BACKUP" ]]; then
+    cp -p -- "$PANEL" "$BACKUP"
+fi
 
 if ! cp -- "$TMPDIR/qml/BatteryPanel.qml" "$PANEL"; then
     cp -- "$BACKUP" "$PANEL"
