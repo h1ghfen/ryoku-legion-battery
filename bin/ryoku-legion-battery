@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BATTERY="/sys/class/power_supply/BAT0/charge_types"
+
+if [[ ! -f "$BATTERY" ]]; then
+    echo "Error: Lenovo charging interface not found." >&2
+    exit 1
+fi
+
+read_mode() {
+    local modes
+    modes=$(<"$BATTERY")
+
+    if [[ "$modes" =~ \[([^]]+)\] ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    else
+        echo "Error: Unable to determine current charging mode." >&2
+        exit 1
+    fi
+}
+
+case "${1:-}" in
+    status)
+        read_mode
+        exit 0
+        ;;
+    conservation)
+        mode="Long_Life"
+        ;;
+    standard)
+        mode="Standard"
+        ;;
+    rapid)
+        mode="Fast"
+        ;;
+    *)
+        echo "Usage: ryoku-legion-battery {status|conservation|standard|rapid}" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$EUID" -ne 0 ]]; then
+    echo "Error: Changing charging modes requires root authorization." >&2
+    exit 1
+fi
+
+if ! grep -Fqw "$mode" <(tr ' []' '\n\n\n' < "$BATTERY"); then
+    echo "Error: Charging mode $mode is unsupported." >&2
+    exit 1
+fi
+
+printf '%s\n' "$mode" > "$BATTERY"
+
+actual=$(read_mode)
+if [[ "$actual" != "$mode" ]]; then
+    echo "Error: Charging mode verification failed ($actual)." >&2
+    exit 1
+fi
+
+printf 'Charging mode: %s\n' "$actual"

@@ -1,0 +1,177 @@
+diff --git a/qml/BatteryPanel.qml b/qml/BatteryPanel.qml
+index 1a48e80..d761258 100644
+--- a/qml/BatteryPanel.qml
++++ b/qml/BatteryPanel.qml
+@@ -32,6 +32,37 @@ PanelWindow {
+     property int    cycles:   0
+     readonly property string healthLabel: batteryId !== "" ? I18n.tr("Health (%1)").arg(batteryId) : I18n.tr("Health")
+     readonly property bool charging: status === "charging"
++    property string chargeMode: ""
++    property bool chargeModeAvailable: false
++    property bool chargeModeBusy: false
++
++    function refreshChargeMode() {
++        if (!chargeModeBusy && !chargeModeRead.running)
++            chargeModeRead.running = true
++    }
++
++    function chargeModeLabel(mode) {
++        if (mode === "Long_Life") return I18n.tr("Conservation")
++        if (mode === "Standard") return I18n.tr("Standard")
++        if (mode === "Fast") return I18n.tr("Rapid")
++        return I18n.tr("Unavailable")
++    }
++
++    function setChargeMode(mode) {
++        if (chargeModeBusy || chargeModeWrite.running)
++            return
++
++        if (["conservation", "standard", "rapid"].indexOf(mode) === -1)
++            return
++
++        chargeModeBusy = true
++        chargeModeWrite.command = [
++            "pkexec",
++            "/usr/local/bin/ryoku-legion-battery",
++            mode
++        ]
++        chargeModeWrite.running = true
++    }
+     function refreshBatteryData() {
+         if (!batData.running) batData.running = true
+     }
+@@ -182,6 +213,81 @@ PanelWindow {
+
+             Rectangle { width: parent.width; height: 1; color: root.sep }
+
++            Column {
++                width: parent.width
++                spacing: 8
++                visible: batPanel.chargeModeAvailable
++
++                Row {
++                    width: parent.width
++                    spacing: 6
++
++                    UiText {
++                        text: I18n.tr("Charging mode")
++                        color: root.sumiHi
++                        font.family: root.mono
++                        font.pixelSize: 11
++                    }
++
++                    Item { width: 1; height: 1 }
++
++                    UiText {
++                        text: batPanel.chargeModeLabel(batPanel.chargeMode)
++                        color: root.seal
++                        font.family: root.mono
++                        font.pixelSize: 11
++                        font.weight: Font.Medium
++                    }
++                }
++
++                Row {
++                    width: parent.width
++                    spacing: 6
++
++                    Repeater {
++                        model: [
++                            { label: I18n.tr("Conservation"), mode: "conservation", value: "Long_Life" },
++                            { label: I18n.tr("Standard"), mode: "standard", value: "Standard" },
++                            { label: I18n.tr("Rapid"), mode: "rapid", value: "Fast" }
++                        ]
++
++                        delegate: Rectangle {
++                            required property var modelData
++
++                            readonly property bool selected:
++                                batPanel.chargeMode === modelData.value
++
++                            width: (col.width - 12) / 3
++                            height: 30
++                            radius: root.panelButtonRadius
++                            color: selected ? root.seal
++                                : modeMouse.containsMouse ? root.fillPrimaryHover
++                                : root.fillActive
++                            opacity: batPanel.chargeModeBusy ? 0.5 : 1
++
++                            UiText {
++                                anchors.centerIn: parent
++                                text: modelData.label
++                                color: selected ? root.paper : root.ink
++                                font.family: root.mono
++                                font.pixelSize: 10
++                            }
++
++                            MouseArea {
++                                id: modeMouse
++                                anchors.fill: parent
++                                hoverEnabled: true
++                                cursorShape: Qt.PointingHandCursor
++                                enabled: !batPanel.chargeModeBusy && !selected
++                                onClicked: batPanel.setChargeMode(modelData.mode)
++                            }
++                        }
++                    }
++                }
++            }
++
++            Rectangle { width: parent.width; height: 1; color: root.sep }
++
+             Rectangle {
+                 width: parent.width
+                 height: 28; radius: root.panelButtonRadius
+@@ -197,6 +303,40 @@ PanelWindow {
+         }
+     }
+
++    Process {
++        id: chargeModeRead
++        command: ["/usr/local/bin/ryoku-legion-battery", "status"]
++        running: false
++
++        stdout: StdioCollector {
++            onStreamFinished: {
++                var mode = this.text.trim()
++                batPanel.chargeModeAvailable =
++                    ["Long_Life", "Standard", "Fast"].indexOf(mode) !== -1
++                batPanel.chargeMode = batPanel.chargeModeAvailable ? mode : ""
++            }
++        }
++
++        onExited: function(exitCode) {
++            if (exitCode !== 0) {
++                batPanel.chargeModeAvailable = false
++                batPanel.chargeMode = ""
++            }
++        }
++    }
++
++    Process {
++        id: chargeModeWrite
++        running: false
++
++        onExited: function(exitCode) {
++            batPanel.chargeModeBusy = false
++            batPanel.refreshChargeMode()
++            if (exitCode !== 0)
++                console.warn("Battery charging mode change failed:", exitCode)
++        }
++    }
++
+     Process {
+         id: batData
+         command: ["bash", "-c", RyokuPower.batteryDataCmd]
+@@ -224,7 +364,10 @@ PanelWindow {
+         running: root.batteryVisible
+         repeat: true
+         triggeredOnStart: true
+-        onTriggered: batPanel.refreshBatteryData()
++        onTriggered: {
++            batPanel.refreshBatteryData()
++            batPanel.refreshChargeMode()
++        }
+     }
+
+ }
