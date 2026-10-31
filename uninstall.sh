@@ -11,8 +11,15 @@ die() {
 }
 
 [[ $EUID -ne 0 ]] || die "Run as your normal user, not with sudo."
-[[ -f "$PANEL" ]] || die "Ryoku Battery panel not found."
-[[ -f "$BACKUP" ]] || die "Original Battery panel backup not found."
+[[ -f "$PANEL" && ! -L "$PANEL" ]] \
+    || die "Ryoku Battery panel is missing or is a symbolic link."
+[[ -f "$BACKUP" && ! -L "$BACKUP" ]] \
+    || die "Original Battery panel backup is missing or is a symbolic link."
+
+if cmp -s -- "$PANEL" "$BACKUP"; then
+    echo "Original Ryoku Battery panel is already restored."
+    exit 0
+fi
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PATCH="$PROJECT_DIR/patches/BatteryPanel.patch"

@@ -10,8 +10,11 @@ Switch between Conservation, Standard, and Rapid charging directly from the Ryok
 - Automatic charging-mode detection
 - Polkit authentication for charging-mode changes
 - Compatibility checks before installation
-- Automatic backup of the original Battery panel
-- Safe uninstaller that detects subsequent panel modifications
+- Idempotent installation with verification of existing patches
+- Automatic backup and validation of the original Battery panel
+- Panel rollback if installation fails
+- Protection against symbolic links and unrelated panel modifications
+- Idempotent uninstallation with backup preservation
 
 ## Charging modes
 
@@ -61,6 +64,14 @@ Run the installer as your normal user, not with `sudo`. It requests administrato
 
 The installer backs up the original panel before applying the patch.
 
+Running `./install.sh` again is safe when the existing installation matches the original backup and project patch. In that case, the installer verifies the installation and exits without modifying files.
+
+If the panel has unexpected modifications or the backup is incompatible, installation stops rather than overwriting those changes.
+
+If panel installation or charging-helper installation fails, the installer attempts to restore the pre-installation panel. A rollback failure is reported explicitly.
+
+The installer rejects symbolic links at the Battery panel path.
+
 ## Command-line usage
 
 Check the current mode:
@@ -84,7 +95,13 @@ pkexec /usr/local/bin/ryoku-legion-battery rapid
 ryoku reload
 ```
 
-The uninstaller verifies the installed panel before restoring the original backup. It retains the backup and charging helper.
+The uninstaller verifies that the installed panel exactly matches the original backup with the project patch applied before restoring it.
+
+If the panel contains unrelated modifications, uninstallation stops without overwriting them.
+
+Running `./uninstall.sh` again after a successful restoration is safe: it detects that the original panel is already restored and exits successfully.
+
+The uninstaller rejects symbolic links at the panel and backup paths. It retains the original backup and charging helper; the helper is not automatically removed.
 
 ## Limitations
 

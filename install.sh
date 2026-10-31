@@ -15,7 +15,8 @@ die() {
 }
 
 [[ $EUID -ne 0 ]] || die "Run as your normal user, not with sudo."
-[[ -f "$PANEL" ]] || die "Ryoku BatteryPanel.qml not found."
+[[ -f "$PANEL" && ! -L "$PANEL" ]] \
+    || die "Ryoku BatteryPanel.qml is missing or is a symbolic link."
 [[ -r "$BATTERY" ]] || die "Lenovo charging interface not found."
 [[ -f "$PATCH" ]] || die "QML patch not found."
 [[ -f "$PROJECT_DIR/bin/ryoku-legion-battery" ]] || die "Helper not found."
@@ -32,38 +33,78 @@ command -v pkexec >/dev/null || die "Polkit (pkexec) is required."
 command -v sudo >/dev/null || die "sudo is required."
 
 if grep -q 'id: chargeModeRead' "$PANEL"; then
-    die "Charging controls are already installed."
+    if [[ ! -f "$BACKUP" || -L "$BACKUP" ]]; then
+        die "Panel is patched but a valid original backup is missing."
+    fi
+
+    TMPDIR="$(mktemp -d)"
+    trap 'rm -rf -- "$TMPDIR"' EXIT
+    mkdir -p "$TMPDIR/qml"
+    cp -- "$BACKUP" "$TMPDIR/qml/BatteryPanel.qml"
+
+    git -C "$TMPDIR" apply --check "$PATCH" \
+        || die "Original backup is incompatible with this patch."
+    git -C "$TMPDIR" apply "$PATCH"
+
+    cmp -s "$PANEL" "$TMPDIR/qml/BatteryPanel.qml" \
+        || die "Installed panel contains unknown modifications."
+
+    echo "Charging controls are already installed and verified."
+    exit 0
 fi
 
-if [[ -e "$BACKUP" ]]; then
+if [[ -e "$BACKUP" || -L "$BACKUP" ]]; then
     [[ -f "$BACKUP" && ! -L "$BACKUP" ]] \
         || die "Backup path is not a regular file: $BACKUP"
-    cmp -s -- "$PANEL" "$BACKUP" \
-        || die "Existing backup differs from the current panel. Refusing to overwrite."
+
+    BACKUP_CHECK="$(mktemp -d)"
+    trap 'rm -rf -- "$BACKUP_CHECK"' EXIT
+
+    mkdir -p "$BACKUP_CHECK/qml"
+    cp -- "$BACKUP" "$BACKUP_CHECK/qml/BatteryPanel.qml"
+
+    git -C "$BACKUP_CHECK" apply --check "$PATCH" \
+        || die "Existing backup is incompatible with this patch."
+
+    cmp -s -- "$BACKUP" "$PANEL" \
+        || die "Existing backup differs from the current unpatched panel. Refusing to overwrite."
+
+    rm -rf -- "$BACKUP_CHECK"
+    trap - EXIT
 fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf -- "$TMPDIR"' EXIT
 
-mkdir -p "$TMPDIR/qml"
+mkdir -p "$TMPDIR/qml" "$TMPDIR/original"
 cp -p -- "$PANEL" "$TMPDIR/qml/BatteryPanel.qml"
+cp -p -- "$PANEL" "$TMPDIR/original/BatteryPanel.qml"
 
 git -C "$TMPDIR" apply --check "$PATCH" \
     || die "Installed Ryoku panel is incompatible with this patch."
 
 git -C "$TMPDIR" apply "$PATCH"
 
-echo "Installing charging helper (administrator permission required)..."
-sudo install -o root -g root -m 755 \
-    "$PROJECT_DIR/bin/ryoku-legion-battery" "$HELPER"
-
 if [[ ! -e "$BACKUP" ]]; then
     cp -p -- "$PANEL" "$BACKUP"
 fi
 
 if ! cp -- "$TMPDIR/qml/BatteryPanel.qml" "$PANEL"; then
-    cp -- "$BACKUP" "$PANEL"
-    die "Panel installation failed; original restored."
+    if cp -- "$TMPDIR/original/BatteryPanel.qml" "$PANEL"; then
+        die "Panel installation failed; pre-installation panel restored."
+    else
+        die "Panel installation and rollback both failed. Manual recovery required."
+    fi
+fi
+
+echo "Installing charging helper (administrator permission required)..."
+if ! sudo install -o root -g root -m 755 \
+    "$PROJECT_DIR/bin/ryoku-legion-battery" "$HELPER"; then
+    if cp -- "$TMPDIR/original/BatteryPanel.qml" "$PANEL"; then
+        die "Helper installation failed; pre-installation panel restored."
+    else
+        die "Helper installation failed and panel rollback failed. Manual recovery required."
+    fi
 fi
 
 echo
